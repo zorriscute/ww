@@ -1,3 +1,27 @@
+-- ===========================
+-- HARDCODED HWID WHITELIST (DO NOT EDIT – OBFUSCATE THIS)
+-- ===========================
+local WHITELISTED_HWIDS = {
+    "your_hwid_1",
+    "your_hwid_2",
+    -- add your whitelisted HWIDs here
+}
+-- ===========================
+
+-- Read user config from _G.Config (or fallback to getgenv().Config)
+local Config = _G.Config or getgenv().Config
+if not Config then
+    error("You must set _G.Config before loading the script!")
+end
+
+-- Validate required fields
+local required = {"MainAccount", "SpinRadius", "SpinSpeed", "AutoRejoinRounds", "WebhookURL"}
+for _, k in ipairs(required) do
+    if Config[k] == nil then
+        error("Missing _G.Config field: " .. k)
+    end
+end
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
@@ -6,45 +30,51 @@ local LogService = game:GetService("LogService")
 local VirtualUser = game:GetService("VirtualUser")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
-
-local currentHWID = "UnknownHWID"
-local success, hwidFunc = pcall(function()
-    return gethwid or hwid or (syn and syn.queue_on_teleport and function() return "SynapseHWID" end)
-end)
-
-if success and type(hwidFunc) == "function" then
-    pcall(function()
-        currentHWID = tostring(hwidFunc())
-    end)
-elseif success and type(hwidFunc) == "string" then
-    currentHWID = hwidFunc
-end
-
-local Whitelist = {
-    ["YOUR_HWID_HERE"] = true,
-    ["ANOTHER_HWID_HERE"] = true
-}
-
-if not Whitelist[currentHWID] then
-    if setclipboard then
-        pcall(setclipboard, currentHWID)
-    end
-    Players.LocalPlayer:Kick("HWID copied to clipboard! Send to the owner to get WL.")
-    return
-end
-
-local Config = _G.Config or {
-    MainAccount = "",
-    SpinRadius = 4,
-    SpinSpeed = 9.7,
-    AutoRejoinRounds = 8,
-    WebhookURL = ""
-}
+local GuiService = game:GetService("GuiService")
 
 local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
+
+-- ===========================
+-- HWID CHECK (HARDCODED WHITELIST)
+-- ===========================
+local function getHWID()
+    local hwid
+    if syn and syn.crypt and syn.crypt.custom and syn.crypt.custom.hash then
+        hwid = syn.crypt.custom.hash(tostring(game.PlaceId) .. tostring(LocalPlayer.UserId))
+    elseif game:GetService("RbxAnalyticsService") then
+        hwid = game:GetService("RbxAnalyticsService"):GetClientId()
+    else
+        hwid = tostring(game.PlaceId) .. tostring(LocalPlayer.UserId) .. tostring(os.time())
+    end
+    return tostring(hwid)
+end
+
+local hwid = getHWID()
+local isWhitelisted = false
+for _, w in ipairs(WHITELISTED_HWIDS) do
+    if string.lower(tostring(w)) == string.lower(hwid) then
+        isWhitelisted = true
+        break
+    end
+end
+
+if not isWhitelisted then
+    pcall(function()
+        if setclipboard then setclipboard(hwid) end
+        if toclipboard then toclipboard(hwid) end
+    end)
+    StarterGui:SetCore("SendNotification", {
+        Title = "HWID Not Whitelisted",
+        Text = "Your HWID has been copied to clipboard. Send it to the owner to get whitelisted.",
+        Duration = 10
+    })
+    task.wait(2)
+    game:Shutdown()
+end
+-- ===========================
 
 local LocalRootPart
 local LocalHumanoid
@@ -155,6 +185,7 @@ end)
 local currentJobId = game.JobId
 local rounds = 0
 local rejoining = false
+local teleporting = false
 local scriptReady = false
 
 local function sendWebhook(round, triggerReason)
@@ -218,7 +249,29 @@ local function sendWebhook(round, triggerReason)
 end
 
 local function safeTeleport()
-    TeleportService:TeleportToPlaceInstance(game.PlaceId, currentJobId, LocalPlayer)
+    if teleporting then return end
+    teleporting = true
+
+    local maxAttempts = 3
+    local attempt = 1
+    local success = false
+    while attempt <= maxAttempts and not success do
+        pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, currentJobId, LocalPlayer)
+            success = true
+        end)
+        if not success then
+            notify("Teleport Retry", "Attempt " .. attempt .. " failed. Retrying...", 3)
+            task.wait(5)
+            attempt = attempt + 1
+        end
+    end
+    if not success then
+        notify("Teleport Failed", "Could not rejoin after " .. maxAttempts .. " attempts. Manual rejoin required.", 5)
+    end
+    task.delay(10, function()
+        teleporting = false
+    end)
 end
 
 local function incrementRounds()
@@ -307,39 +360,7 @@ task.spawn(function()
     end
 end)
 
-local lastMessageTime = 0
-local debounceThreshold = 0.5
-
-LogService.MessageOut:Connect(function(message, messageType)
-    if not scriptReady then return end
-    if messageType == Enum.MessageType.MessageError then return end
-
-    local now = os.clock()
-    if now - lastMessageTime >= debounceThreshold then
-        lastMessageTime = now
-
-        if string.find(message, "LOAD PROGRESS") then
-            incrementRounds()
-        end
-
-        local msg = string.lower(message)
-        if (string.find(msg, "idle") or string.find(msg, "kicked")) and rounds > 0 and not isMain then
-            if not rejoining then
-                rejoining = true
-                notify("System", "Idle or disconnect mitigation triggered. Rejoining...", 5)
-                task.delay(2, safeTeleport)
-            end
-        end
-    end
-
-    if string.find(message, "SslConnectFail") then
-        if not rejoining then
-            rejoining = true
-            notify("Anti-Glitched Server", "Roblox SSL Connection Error Detected! Rejoining server...", 5)
-            task.delay(2, safeTeleport)
-        end
-    end
-end)
+-- All rejoin‑on‑kick / idle triggers have been removed.
 
 task.delay(10, function()
     scriptReady = true
@@ -381,5 +402,3 @@ task.delay(10, function()
         end)
     end
 end)
-
-setfpscap(30)
