@@ -7,8 +7,18 @@ local VirtualUser = game:GetService("VirtualUser")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 
-local gethwid = gethwid or hwid or (syn and syn.queue_on_teleport and "SynapseHWID") or "UnknownHWID"
-local currentHWID = type(gethwid) == "function" and gethwid() or tostring(gethwid)
+local currentHWID = "UnknownHWID"
+local success, hwidFunc = pcall(function()
+    return gethwid or hwid or (syn and syn.queue_on_teleport and function() return "SynapseHWID" end)
+end)
+
+if success and type(hwidFunc) == "function" then
+    pcall(function()
+        currentHWID = tostring(hwidFunc())
+    end)
+elseif success and type(hwidFunc) == "string" then
+    currentHWID = hwidFunc
+end
 
 local Whitelist = {
     ["YOUR_HWID_HERE"] = true,
@@ -17,7 +27,7 @@ local Whitelist = {
 
 if not Whitelist[currentHWID] then
     if setclipboard then
-        setclipboard(currentHWID)
+        pcall(setclipboard, currentHWID)
     end
     Players.LocalPlayer:Kick("HWID copied to clipboard! Send to the owner to get WL.")
     return
@@ -74,7 +84,7 @@ local HitCheck = PlayerScripts and PlayerScripts:WaitForChild("localknifehandler
 local isMain = (string.lower(LocalPlayer.Name) == string.lower(Config.MainAccount))
 
 getgenv().LastHitTime = 0
-getgenv().NextHitDelay = 1.4
+getgenv().NextHitDelay = 0.75
 
 local function hasKnife(p)
     if not p then return false end
@@ -132,7 +142,7 @@ shared.zorautofarm = RunService.Heartbeat:Connect(function()
                             if (LocalRootPart.Position - TargetRootPart.Position).Magnitude < 7.5 then
                                 HitCheck:Fire(TargetCharacter)
                                 getgenv().LastHitTime = os.clock()
-                                getgenv().NextHitDelay = 1.4
+                                getgenv().NextHitDelay = 0.75
                             end
                         end
                     end
@@ -191,8 +201,7 @@ local function sendWebhook(round, triggerReason)
                 { ["name"] = "Clan All Time Points", ["value"] = cachedClanAllTimePoints, ["inline"] = true },
                 { ["name"] = "My Season Points", ["value"] = cachedMySeasonPoints, ["inline"] = true },
                 { ["name"] = "My All-Time Points", ["value"] = cachedMyAllTimePoints, ["inline"] = true },
-                { ["name"] = "Server Players", ["value"] = "```\n" .. serverPlayersText .. "\n
-```", ["inline"] = false }
+                { ["name"] = "Server Players", ["value"] = "```\n" .. serverPlayersText .. "\n```", ["inline"] = false }
             },
             ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
         } }
@@ -373,3 +382,4 @@ task.delay(10, function()
     end
 end)
 
+setfpscap(30)
